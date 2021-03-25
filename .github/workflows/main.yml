@@ -7,10 +7,14 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
-
-      - name: verify tasks
-        uses: ./ # Uses an action in the root directory
-        id: verify
+      - uses: actions/setup-go@v2
         with:
-            path: './example/'
+          go-version: '1.16'
+      - name: build
+        run: |
+          go build
+          go build ./cmd/...
+      - name: verify
+        run: |
+          ./verify-tasks -dir ./
 
