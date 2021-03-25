@@ -12,5 +12,5 @@ COPY --from=builder /go/bin/app/result-md /result-md
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-ENTRYPOINT /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
