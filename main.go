@@ -116,6 +116,7 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 
 			cmd := exec.CommandContext(ctx, "bash", "solve.bash")
 			cmd.Dir = filepath.Join(solutionDir, solution.Name())
+			cmd.Env = os.Environ()
 			cmd.Env = append(cmd.Env, "HOST="+filepath.Base(taskDir))
 			stdouterr, _ := cmd.CombinedOutput()
 			log.Println(string(stdouterr))
