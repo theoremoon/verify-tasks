@@ -60,7 +60,7 @@ func run() error {
 	sb.WriteString("| ---- | -------- | ------ |\n")
 	for _, taskInfo := range taskInfos {
 		if len(taskInfo.Solutions) == 0 {
-			sb.WriteString(fmt.Sprintf("| %s |          |        |\n", taskInfo.Name))
+			sb.WriteString(fmt.Sprintf("| %s |   :x:    |        |\n", taskInfo.Name))
 		} else {
 			for i, solution := range taskInfo.Solutions {
 				if i == 0 {
