@@ -14,5 +14,3 @@ jobs:
         with:
             path: './example/'
 
-      - name: echo result
-        run: echo "${{ steps.verify.outputs.result }}"
