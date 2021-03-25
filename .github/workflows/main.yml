@@ -1,0 +1,18 @@
+on: [push]
+
+jobs:
+  verify-tasks:
+    runs-on: ubuntu-latest
+    name: verify-tasks
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: verify tasks
+        uses: ./ # Uses an action in the root directory
+        id: verify
+        with:
+            path: './example/'
+
+      - name: echo result
+        run: echo "${{ steps.verify.outputs.result }}"

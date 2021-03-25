@@ -1,0 +1,18 @@
+name: 'Verify Tasks'
+description: 'Verify CTF tasks in repository'
+inputs:
+    path:
+        description: 'path for task directory'
+        required: true
+    timeout:
+        description: 'timeout for each solution'
+        default: '10m'
+outputs:
+    result:
+        description: 'markdown table string'
+runs:
+    using: 'docker'
+    image: 'Dockerfile'
+    args:
+        - ${{ inputs.path }}
+        - ${{ inputs.timeout }}

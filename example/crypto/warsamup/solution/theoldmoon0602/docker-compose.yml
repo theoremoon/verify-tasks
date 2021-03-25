@@ -1,0 +1,8 @@
+version: '3'
+services:
+  solve:
+    build:
+      context: ../../
+      dockerfile: ./solution/theoldmoon0602/Dockerfile
+    command: sage solve.sage
+
