@@ -118,9 +118,7 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 			cmd.Dir = filepath.Join(solutionDir, solution.Name())
 			cmd.Env = os.Environ()
 			cmd.Env = append(cmd.Env, "HOST="+filepath.Base(taskDir))
-			log.Printf("Env = %+v\n", cmd.Env)
 			stdouterr, _ := cmd.CombinedOutput()
-			log.Println(string(stdouterr))
 			results = append(results, Solution{
 				Name:   solution.Name(),
 				Result: strings.Contains(string(stdouterr), taskYaml.Flag),
