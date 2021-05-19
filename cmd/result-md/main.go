@@ -20,6 +20,9 @@ type TaskInfo struct {
 	Name      string     `json:"name"`
 	Solutions []Solution `json:"solutions"`
 }
+type VerityJson struct {
+	Results []TaskInfo `json:"results"`
+}
 
 func formatSolution(result bool) string {
 	if result {
@@ -50,15 +53,15 @@ func run() error {
 	if err != nil {
 		return xerrors.Errorf(": %w", err)
 	}
-	var taskInfos []TaskInfo
-	if err := json.Unmarshal(jsonBlob, &taskInfos); err != nil {
+	var jsonData VerityJson
+	if err := json.Unmarshal(jsonBlob, &jsonData); err != nil {
 		return xerrors.Errorf(": %w", err)
 	}
 
 	sb := strings.Builder{}
 	sb.WriteString("| Task | Solution | Result |\n")
 	sb.WriteString("| ---- | -------- | ------ |\n")
-	for _, taskInfo := range taskInfos {
+	for _, taskInfo := range jsonData.Results {
 		if len(taskInfo.Solutions) == 0 {
 			sb.WriteString(fmt.Sprintf("| %s |   :x:    |        |\n", taskInfo.Name))
 		} else {

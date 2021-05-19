@@ -14,6 +14,7 @@ import (
 	"time"
 
 	yaml "github.com/goccy/go-yaml"
+	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/xerrors"
 )
 
@@ -28,6 +29,10 @@ type Solution struct {
 type TaskInfo struct {
 	Name      string     `json:"name"`
 	Solutions []Solution `json:"solutions"`
+}
+type VerifyJson struct {
+	Results []TaskInfo        `json:"results"`
+	Hashes  map[string]string `json:"hashes"`
 }
 
 const DefaultNewtork = `verify`
@@ -47,6 +52,24 @@ func MakeOverride(dir string) (func(), error) {
 	return func() {
 		os.Remove(path)
 	}, nil
+}
+
+func GetDirHash(taskDir string) (string, string, error) {
+	yamlBlob, err := os.ReadFile(filepath.Join(taskDir, "task.yml"))
+	if err != nil {
+		return "", "", xerrors.Errorf(": %w", err)
+	}
+
+	taskYaml := TaskYaml{}
+	if err := yaml.Unmarshal(yamlBlob, &taskYaml); err != nil {
+		return "", "", xerrors.Errorf(": %w", err)
+	}
+
+	h1, err := dirhash.HashDir(taskDir, "", dirhash.Hash1)
+	if err != nil {
+		return "", "", xerrors.Errorf(": %w", err)
+	}
+	return taskYaml.Name, h1, nil
 }
 
 func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
@@ -136,7 +159,7 @@ func run() error {
 	var timeout string
 	var output string
 	flag.StringVar(&dir, "dir", "", "directory to parse")
-	flag.StringVar(&output, "output", "-", "a filename to output result")
+	flag.StringVar(&output, "json", "-", "a json file to store the result")
 	flag.StringVar(&timeout, "timeout", "10m", "timeout of solution running time")
 
 	flag.Usage = func() {
@@ -152,6 +175,21 @@ func run() error {
 		return xerrors.Errorf(": %w", err)
 	}
 
+	dataStore := VerifyJson{
+		Results: []TaskInfo{},
+		Hashes:  make(map[string]string),
+	}
+	if _, err := os.Stat(output); err == nil {
+		blob, err := os.ReadFile(output)
+		if err != nil {
+			return xerrors.Errorf(": %w", err)
+		}
+
+		if err := json.Unmarshal(blob, &dataStore); err != nil {
+			return xerrors.Errorf(": %w", err)
+		}
+	}
+
 	taskDirs := make([]string, 0)
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -163,6 +201,18 @@ func run() error {
 		}
 
 		taskDir := filepath.Dir(path)
+		taskName, newHash, err := GetDirHash(taskDir)
+		if err == nil {
+			// ディレクトリのハッシュが以前と同じならその問題はスキップする
+			pastHash, exist := dataStore.Hashes[taskName]
+			if exist && pastHash == newHash {
+				log.Printf("Skip: %s\n", taskName)
+				return nil
+			}
+
+			dataStore.Hashes[taskName] = newHash
+		}
+
 		solutionDir := filepath.Join(taskDir, "solution")
 		if _, err := os.Stat(solutionDir); err == nil {
 			taskDirs = append(taskDirs, taskDir)
@@ -181,17 +231,13 @@ func run() error {
 		}
 	}
 
-	jsonBlob, err := json.Marshal(taskInfos)
+	jsonBlob, err := json.Marshal(dataStore)
 	if err != nil {
 		return xerrors.Errorf(": %w", err)
 	}
 
-	if output == "" || output == "-" {
-		fmt.Println(string(jsonBlob))
-	} else {
-		if err := os.WriteFile(output, jsonBlob, 0644); err != nil {
-			return xerrors.Errorf(": %w", err)
-		}
+	if err := os.WriteFile(output, jsonBlob, 0644); err != nil {
+		return xerrors.Errorf(": %w", err)
 	}
 
 	return nil
