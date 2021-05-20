@@ -8,4 +8,4 @@ This action verifies CTF tasks on repository.
 |:---------:|:----:|:--------:|:-------:|
 | **path** | input | true | `./tasks` |
 | **timeout** | input | true | `10m` |
-| **output** | input | true | `result.md` |
+| **json** | input | true | `result.md` |
