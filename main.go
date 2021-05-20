@@ -14,6 +14,7 @@ import (
 	"time"
 
 	yaml "github.com/goccy/go-yaml"
+	"github.com/google/uuid"
 	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/xerrors"
 )
@@ -92,13 +93,18 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 		return nil, xerrors.Errorf(": %w", err)
 	}
 
+	// どうせdocker-compose downで消えるのでこのあたりで作って消す
+	exec.Command("docker", "network", "create", DefaultNewtork).Run()
+	defer func() {
+		exec.Command("docker", "network", "rm", DefaultNewtork).Run()
+	}()
+
 	if _, err := os.Stat(dockerCompose); err == nil {
 		// docker-compose.ymlが存在すれば、networkを起動してdocker-compose upする
 		// deferで関数を抜けるときにdocker-compose downし、networkを削除する
 
 		// docker-compose.override.yml でnetworkを指定する
 		remove, _ := MakeOverride(taskDir)
-		exec.Command("docker", "network", "create", DefaultNewtork)
 
 		cmd := exec.Command("docker-compose", "up", "-d", "--build")
 		cmd.Dir = taskDir
@@ -113,7 +119,6 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 			cmd.Stderr = os.Stderr
 			cmd.Run()
 			remove()
-			exec.Command("docker", "network", "rm", DefaultNewtork)
 		}()
 	}
 
@@ -123,30 +128,92 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 		if !solution.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "solve.bash")); err != nil {
-			continue
+
+		if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "solve.bash")); err == nil {
+			// solve.bash があるとき
+			func() {
+				log.Printf("Solution: %s\n", solution.Name())
+
+				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				// docker-compose.override.yml でnetworkを指定する
+				remove, _ := MakeOverride(filepath.Join(solutionDir, solution.Name()))
+				defer remove()
+
+				cmd := exec.CommandContext(ctx, "bash", "solve.bash")
+				cmd.Dir = filepath.Join(solutionDir, solution.Name())
+				cmd.Env = os.Environ()
+				cmd.Env = append(cmd.Env, "HOST="+filepath.Base(taskDir))
+				stdouterr, _ := cmd.CombinedOutput()
+				results = append(results, Solution{
+					Name:   solution.Name(),
+					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
+				})
+			}()
+		} else if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "docker-compose.yml")); err == nil {
+			// docker-compose.yml があるとき
+			func() {
+				log.Printf("Solution: %s\n", solution.Name())
+
+				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				// docker-compose.override.yml でnetworkを指定する
+				remove, _ := MakeOverride(filepath.Join(solutionDir, solution.Name()))
+				defer remove()
+
+				build := exec.CommandContext(ctx, "docker-compose", "build")
+				build.Dir = filepath.Join(solutionDir, solution.Name())
+				build.Run()
+
+				up := exec.CommandContext(ctx, "docker-compose", "up")
+				up.Dir = filepath.Join(solutionDir, solution.Name())
+				up.Env = os.Environ()
+				up.Env = append(build.Env, "HOST="+filepath.Base(taskDir))
+
+				stdouterr, _ := up.CombinedOutput()
+				results = append(results, Solution{
+					Name:   solution.Name(),
+					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
+				})
+			}()
+		} else if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "Dockerfile")); err == nil {
+			// Dockerfileがあるとき
+			func() {
+				log.Printf("Solution: %s\n", solution.Name())
+
+				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				imageTag := uuid.New().String()
+				defer func() {
+					rm := exec.CommandContext(ctx, "docker", "rmi", imageTag)
+					rm.Run()
+				}()
+
+				build := exec.CommandContext(ctx, "docker", "build", ".", "-t", imageTag)
+				build.Dir = filepath.Join(solutionDir, solution.Name())
+				build.Run()
+
+				dir, _ := filepath.Abs(filepath.Join(taskDir, "distfiles"))
+				run := exec.CommandContext(ctx,
+					"docker", "run",
+					"--rm",
+					"--network", DefaultNewtork,
+					"-v", dir+":/distfiles",
+					imageTag,
+				)
+				run.Dir = filepath.Join(taskDir)
+
+				stdouterr, _ := run.CombinedOutput()
+				results = append(results, Solution{
+					Name:   solution.Name(),
+					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
+				})
+			}()
 		}
 
-		func() {
-			log.Printf("Solution: %s\n", solution.Name())
-
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			// docker-compose.override.yml でnetworkを指定する
-			remove, _ := MakeOverride(filepath.Join(solutionDir, solution.Name()))
-			defer remove()
-
-			cmd := exec.CommandContext(ctx, "bash", "solve.bash")
-			cmd.Dir = filepath.Join(solutionDir, solution.Name())
-			cmd.Env = os.Environ()
-			cmd.Env = append(cmd.Env, "HOST="+filepath.Base(taskDir))
-			stdouterr, _ := cmd.CombinedOutput()
-			results = append(results, Solution{
-				Name:   solution.Name(),
-				Result: strings.Contains(string(stdouterr), taskYaml.Flag),
-			})
-		}()
 	}
 	return &TaskInfo{
 		Name:      taskYaml.Name,
@@ -159,7 +226,7 @@ func run() error {
 	var timeout string
 	var output string
 	flag.StringVar(&dir, "dir", "", "directory to parse")
-	flag.StringVar(&output, "json", "-", "a json file to store the result")
+	flag.StringVar(&output, "json", "", "a json file to store the result")
 	flag.StringVar(&timeout, "timeout", "10m", "timeout of solution running time")
 
 	flag.Usage = func() {
@@ -169,6 +236,9 @@ func run() error {
 	flag.Parse()
 	if _, err := os.Stat(dir); err != nil {
 		return xerrors.Errorf("directory not found: %s", dir)
+	}
+	if output == "" {
+		return xerrors.Errorf("output is not specified")
 	}
 	timeoutDuration, err := time.ParseDuration(timeout)
 	if err != nil {
