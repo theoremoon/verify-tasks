@@ -223,15 +223,25 @@ func run() error {
 		return xerrors.Errorf(": %w", err)
 	}
 
-	taskInfos := make([]TaskInfo, len(taskDirs))
-	for i, taskDir := range taskDirs {
+	for _, taskDir := range taskDirs {
 		tInfo, err := CheckTask(taskDir, timeoutDuration)
 		if err != nil {
 			return xerrors.Errorf(": %w", err)
 		}
-		taskInfos[i] = *tInfo
+
+		found := false
+		for i, v := range dataStore.Results {
+			if v.Name == tInfo.Name {
+				dataStore.Results[i] = *tInfo
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			dataStore.Results = append(dataStore.Results, *tInfo)
+		}
 	}
-	dataStore.Results = taskInfos
 	jsonBlob, err := json.Marshal(dataStore)
 	if err != nil {
 		return xerrors.Errorf(": %w", err)
