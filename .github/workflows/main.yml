@@ -16,5 +16,5 @@ jobs:
           go build ./cmd/...
       - name: verify
         run: |
-          ./verify-tasks -dir ./
+          ./verify-tasks -dir ./ -json veiry.json
 
