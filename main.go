@@ -75,6 +75,7 @@ func GetDirHash(taskDir string) (string, string, error) {
 
 func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 	log.Printf("Task: %s\n", taskDir)
+	taskID := filepath.Base(taskDir)
 	solutionDir := filepath.Join(taskDir, "solution")
 	dockerCompose := filepath.Join(taskDir, "docker-compose.yml")
 
@@ -92,6 +93,9 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 	if err != nil {
 		return nil, xerrors.Errorf(": %w", err)
 	}
+
+	// おまじない
+	exec.Command("docker", "network", "rm", DefaultNewtork).Run()
 
 	// どうせdocker-compose downで消えるのでこのあたりで作って消す
 	exec.Command("docker", "network", "create", DefaultNewtork).Run()
@@ -196,11 +200,15 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 				build.Dir = filepath.Join(solutionDir, solution.Name())
 				build.Run()
 
+				containerName := uuid.New().String()
 				dir, _ := filepath.Abs(filepath.Join(taskDir, "distfiles"))
 				run := exec.CommandContext(ctx,
 					"docker", "run",
+					"--name", containerName,
 					"--rm",
 					"--network", DefaultNewtork,
+					"-e", fmt.Sprintf("HOST=%s.verify", taskID),
+					"-e", fmt.Sprintf("HOST-SELF=%s.verify", containerName),
 					"-v", dir+":/distfiles",
 					imageTag,
 				)
