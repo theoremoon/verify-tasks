@@ -44,13 +44,15 @@ networks:
     name: verify
 `
 
-func MakeOverride(dir string) (func(), error) {
+var verbose bool
+
+func MakeOverride(dir string) (string, func(), error) {
 	path := filepath.Join(dir, "docker-compose.override.yml")
 	err := os.WriteFile(path, []byte(DockerComposeOverride), 0755)
 	if err != nil {
-		return nil, xerrors.Errorf(": %w", err)
+		return "", nil, xerrors.Errorf(": %w", err)
 	}
-	return func() {
+	return path, func() {
 		os.Remove(path)
 	}, nil
 }
@@ -108,9 +110,9 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 		// deferで関数を抜けるときにdocker-compose downし、networkを削除する
 
 		// docker-compose.override.yml でnetworkを指定する
-		remove, _ := MakeOverride(taskDir)
+		overrideCompose, remove, _ := MakeOverride(taskDir)
 
-		cmd := exec.Command("docker-compose", "up", "-d", "--build")
+		cmd := exec.Command("docker-compose", "-f", dockerCompose, "-f", overrideCompose, "up", "-d", "--build")
 		cmd.Dir = taskDir
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
@@ -133,7 +135,11 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 			continue
 		}
 
-		if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "solve.bash")); err == nil {
+		solveBash := filepath.Join(solutionDir, solution.Name(), "solve.bash")
+		solveCompose := filepath.Join(solutionDir, solution.Name(), "docker-compose.yml")
+		solveDockerfile := filepath.Join(solutionDir, solution.Name(), "Dockerfile")
+
+		if _, err := os.Stat(solveBash); err == nil {
 			// solve.bash があるとき
 			func() {
 				log.Printf("Solution: %s\n", solution.Name())
@@ -141,48 +147,51 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
 
-				// docker-compose.override.yml でnetworkを指定する
-				remove, _ := MakeOverride(filepath.Join(solutionDir, solution.Name()))
-				defer remove()
-
 				cmd := exec.CommandContext(ctx, "bash", "solve.bash")
 				cmd.Dir = filepath.Join(solutionDir, solution.Name())
 				cmd.Env = os.Environ()
 				cmd.Env = append(cmd.Env, "HOST="+filepath.Base(taskDir))
 				stdouterr, _ := cmd.CombinedOutput()
+				if verbose {
+					log.Println(string(stdouterr))
+				}
 				results = append(results, Solution{
 					Name:   solution.Name(),
 					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
 				})
 			}()
-		} else if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "docker-compose.yml")); err == nil {
+		} else if _, err := os.Stat(solveCompose); err == nil {
 			// docker-compose.yml があるとき
 			func() {
 				log.Printf("Solution: %s\n", solution.Name())
 
+				dir := filepath.Join(solutionDir, solution.Name())
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
 
 				// docker-compose.override.yml でnetworkを指定する
-				remove, _ := MakeOverride(filepath.Join(solutionDir, solution.Name()))
+				overrideCompose, remove, _ := MakeOverride(dir)
 				defer remove()
 
-				build := exec.CommandContext(ctx, "docker-compose", "build")
-				build.Dir = filepath.Join(solutionDir, solution.Name())
+				build := exec.CommandContext(ctx, "docker-compose", "-f", solveCompose, "-f", overrideCompose, "build")
+				build.Dir = dir
 				build.Run()
 
-				up := exec.CommandContext(ctx, "docker-compose", "up")
-				up.Dir = filepath.Join(solutionDir, solution.Name())
+				up := exec.CommandContext(ctx, "docker-compose", "-f", solveCompose, "-f", overrideCompose, "up")
+				up.Dir = dir
 				up.Env = os.Environ()
 				up.Env = append(build.Env, "HOST="+filepath.Base(taskDir))
 
 				stdouterr, _ := up.CombinedOutput()
+				if verbose {
+					log.Println(string(stdouterr))
+				}
 				results = append(results, Solution{
 					Name:   solution.Name(),
 					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
 				})
 			}()
-		} else if _, err := os.Stat(filepath.Join(solutionDir, solution.Name(), "Dockerfile")); err == nil {
+		} else if _, err := os.Stat(solveDockerfile); err == nil {
 			// Dockerfileがあるとき
 			func() {
 				log.Printf("Solution: %s\n", solution.Name())
@@ -198,7 +207,10 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 
 				build := exec.CommandContext(ctx, "docker", "build", ".", "-t", imageTag)
 				build.Dir = filepath.Join(solutionDir, solution.Name())
-				build.Run()
+				buildResult, _ := build.CombinedOutput()
+				if verbose {
+					log.Println(string(buildResult))
+				}
 
 				containerName := uuid.New().String()
 				dir, _ := filepath.Abs(filepath.Join(taskDir, "distfiles"))
@@ -215,6 +227,9 @@ func CheckTask(taskDir string, timeout time.Duration) (*TaskInfo, error) {
 				run.Dir = filepath.Join(taskDir)
 
 				stdouterr, _ := run.CombinedOutput()
+				if verbose {
+					log.Println(string(stdouterr))
+				}
 				results = append(results, Solution{
 					Name:   solution.Name(),
 					Result: strings.Contains(string(stdouterr), taskYaml.Flag),
@@ -236,6 +251,7 @@ func run() error {
 	flag.StringVar(&dir, "dir", "", "directory to parse")
 	flag.StringVar(&output, "json", "", "a json file to store the result")
 	flag.StringVar(&timeout, "timeout", "10m", "timeout of solution running time")
+	flag.BoolVar(&verbose, "verbose", false, "log verbosity")
 
 	flag.Usage = func() {
 		fmt.Printf("Usage: %s\n\n", os.Args[0])
